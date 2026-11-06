@@ -15,6 +15,7 @@ import { CancellableLoader, Container, Spacer, matchesKey, visibleWidth, truncat
 
 import { collectUsageData, getAgentDir, TAB_ORDER } from "./data";
 import { parseCustomRange } from "./time-range.ts";
+import { showUsageReport } from "./report-command.ts";
 import type { CollectProgress } from "./data";
 import type { BaseStats, ProviderStats, TabName, TotalStats, UsageData } from "./data";
 import {
@@ -938,9 +939,13 @@ class UsageComponent {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("usage", {
-		description: "用量统计交互面板（支持自定义时间范围）",
+		description: "用量统计：pi-web SVG 图表报告 / 终端交互面板（支持自定义时间范围）",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			if (!ctx.hasUI) {
+				return;
+			}
+			if (ctx.mode !== "tui") {
+				await showUsageReport(pi, ctx, args);
 				return;
 			}
 			let customRange;
