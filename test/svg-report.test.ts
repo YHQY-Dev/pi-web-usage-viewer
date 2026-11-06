@@ -8,7 +8,7 @@ import { collectUsageData } from "../data.ts";
 import type { TimeFilteredStats, UsageData } from "../data.ts";
 import { parseCustomRange } from "../time-range.ts";
 import { buildTrend, buildUsageReport, modelRows, renderTrendSvg, escapeXml } from "../svg-report.ts";
-import { parseReportArgs, showUsageReport } from "../report-command.ts";
+import { defaultWeekRange, parseReportArgs, showUsageReport } from "../report-command.ts";
 
 function emptyStats(): TimeFilteredStats {
 	return { dailyCosts: new Map(), dailyModelCosts: new Map(), providers: new Map(), totals: {
@@ -148,14 +148,25 @@ test("report headings show actual dates and compact timezone, with only range he
 	assert.ok(buildUsageReport(data, "custom").includes("2026-11-01 08:30 至 2026-11-01 09:15（结束时刻不含）"));
 });
 
+test("default range is backend-local Monday through today, including Sunday and year boundaries", () => {
+	assert.equal(defaultWeekRange(new Date(2026, 10, 6, 17)), "2026-11-02 2026-11-06");
+	assert.equal(defaultWeekRange(new Date(2026, 10, 2)), "2026-11-02 2026-11-02");
+	assert.equal(defaultWeekRange(new Date(2026, 10, 8, 23, 59)), "2026-11-02 2026-11-08");
+	assert.equal(defaultWeekRange(new Date(2027, 0, 1)), "2026-12-28 2027-01-01");
+});
+
 function mocks(selection?: string, inputs: (string | undefined)[] = []) {
 	const messages: { content: string; display: boolean }[] = [];
 	const options: unknown[] = [];
 	const notifications: string[] = [];
 	const pi = { sendMessage(message: typeof messages[number], opts: unknown) { messages.push(message); options.push(opts); } } as unknown as ExtensionAPI;
-	const ctx = { ui: { select: async () => selection, input: async () => inputs.shift(),
+	const prefills: string[] = [];
+	const ctx = { ui: { select: async () => selection, editor: async (_title: string, prefill: string) => {
+		prefills.push(prefill);
+		return inputs.shift();
+	},
 		notify: (message: string) => notifications.push(message) } } as unknown as ExtensionCommandContext;
-	return { pi, ctx, messages, options, notifications };
+	return { pi, ctx, messages, options, notifications, prefills };
 }
 
 test("web report command supports presets, native range picker, and no model turn", async () => {
@@ -168,16 +179,17 @@ test("web report command supports presets, native range picker, and no model tur
 		assert.equal(m.messages[0]!.display, true);
 		assert.deepEqual(m.options, [{ triggerTurn: false }]);
 	}
-	const m = mocks("自定义时间范围", ["2026-11-01", "2026-11-03"]);
+	const m = mocks("设置范围", ["2026-11-01 2026-11-03"]);
 	await showUsageReport(m.pi, m.ctx, "", async (options) => {
 		assert.equal(options!.customRange!.startMs, new Date(2026, 10, 1).getTime());
 		return fixture();
 	});
 	assert.equal(m.messages.length, 1);
+	assert.deepEqual(m.prefills, [defaultWeekRange()]);
 });
 
 test("cancel/invalid range never scans, collector failure never appends stale report", async () => {
-	for (const m of [mocks(), mocks("自定义时间范围", [undefined]), mocks("自定义时间范围", ["2026-11-01", undefined])]) {
+	for (const m of [mocks(), mocks("设置范围", [undefined]), mocks("设置范围", ["   "])]) {
 		await showUsageReport(m.pi, m.ctx, "", async () => { assert.fail("must not scan"); });
 		assert.equal(m.messages.length, 0);
 	}

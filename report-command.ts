@@ -12,6 +12,13 @@ export function parseReportArgs(args: string): { period: TabName; customRange?: 
 	return { period: "custom", customRange: parseCustomRange(value)! };
 }
 
+export function defaultWeekRange(now: Date = new Date()): string {
+	const monday = new Date(now);
+	monday.setDate(monday.getDate() - (monday.getDay() + 6) % 7);
+	const date = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+	return `${date(monday)} ${date(now)}`;
+}
+
 /** Uses only standard Pi dialogs and visible Markdown custom messages. */
 export async function showUsageReport(
 	pi: ExtensionAPI, ctx: ExtensionCommandContext, args: string,
@@ -21,15 +28,16 @@ export async function showUsageReport(
 		let query = args.trim();
 		if (!query) {
 			const options = Object.entries(REPORT_PERIODS).map(([key, label]) => `${label} (${key})`);
-			const custom = "自定义时间范围";
+			const custom = "设置范围";
 			const selected = await ctx.ui.select("用量统计：选择时间范围（后端本地时间）", [...options, custom]);
 			if (!selected) return;
 			if (selected === custom) {
-				const start = await ctx.ui.input("开始日期 / 时间（后端本地时间）", "YYYY-MM-DD 或 YYYY-MM-DDTHH:mm");
-				if (!start?.trim()) return;
-				const end = await ctx.ui.input("结束日期含当天；结束时刻不含", "YYYY-MM-DD 或 YYYY-MM-DDTHH:mm");
-				if (!end?.trim()) return;
-				query = `${start.trim()} ${end.trim()}`;
+				const range = await ctx.ui.editor(
+					"设置范围：起止时间用空格分隔（本地时间，默认本周一至今天）",
+					defaultWeekRange(),
+				);
+				if (!range?.trim()) return;
+				query = range.trim();
 			} else {
 				query = Object.keys(REPORT_PERIODS)[options.indexOf(selected)]!;
 			}
