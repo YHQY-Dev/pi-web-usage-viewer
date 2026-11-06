@@ -1,3 +1,20 @@
+# pi-web-usage-viewer
+
+面向 pi-web 的用量与费用统计查看器，基于 Thomas Mustier 的 **@tmustier/pi-usage-extension** 独立改造。
+
+## 项目来源与当前状态
+
+- **上游仓库**：[tmustier/pi-extensions](https://github.com/tmustier/pi-extensions)。
+- **来源子目录**：[usage-extension](https://github.com/tmustier/pi-extensions/tree/f2632e7da3cadc4f22fb8367e7c4454779ec1a05/usage-extension)，仅提取这个插件，不包含上游其他扩展。
+- **导入版本**：`0.10.2`；上游提交：`f2632e7da3cadc4f22fb8367e7c4454779ec1a05`。
+- **本项目仓库**：[YHQY-Dev/pi-web-usage-viewer](https://github.com/YHQY-Dev/pi-web-usage-viewer)。这是独立仓库，不是整个上游仓库的 GitHub fork。
+- **当前状态**：已导入原始代码，作为后续 pi-web 适配的开发基线，尚未进行功能改造。包名及下方安装说明仍保留上游原样；其中的 npm 安装命令安装的是上游插件，不是本项目。
+- **版权与许可**：原始代码版权归 Thomas Mustier 所有，采用 MIT 许可证；完整保留原始 [LICENSE](LICENSE)。本项目不是上游官方发行版。
+
+---
+
+以下为上游原始说明。
+
 # /usage - Usage Statistics Dashboard
 
 A Pi extension that displays aggregated usage statistics across all sessions.
