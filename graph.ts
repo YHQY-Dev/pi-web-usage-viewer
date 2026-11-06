@@ -112,6 +112,9 @@ function groupKeyOf(key: HourlyKey, groupBy: GraphGroupBy): string {
 
 function domainFor(period: TabName, bounds: PeriodBounds, hourly: Map<number, Map<HourlyKey, HourlyCell>>): { startMs: number; endMs: number } {
 	switch (period) {
+		case "custom":
+			if (!bounds.customRange) throw new Error("Custom range is missing");
+			return bounds.customRange;
 		case "today":
 			return { startMs: bounds.todayMs, endMs: bounds.nowMs };
 		case "thisWeek":
@@ -161,8 +164,9 @@ export function buildGraphModel(
 	let totalSum = 0;
 
 	for (const [hour, bucket] of hourly) {
-		if (hour < startMs || hour >= endMs) continue;
-		const idx = Math.min(bucketCount - 1, Math.floor((hour - startMs) / bucketMs));
+		// Custom hourly cells were filtered at message precision before bucketing.
+		if ((options.period === "custom" ? hour + HOUR_MS <= startMs : hour < startMs) || hour >= endMs) continue;
+		const idx = Math.max(0, Math.min(bucketCount - 1, Math.floor((hour - startMs) / bucketMs)));
 		for (const [key, cell] of bucket) {
 			const value = metricOf(cell, options.metric);
 			if (value === 0) continue;

@@ -14,6 +14,7 @@ import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { CancellableLoader, Container, Spacer, matchesKey, visibleWidth, truncateToWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 
 import { collectUsageData, getAgentDir, TAB_ORDER } from "./data";
+import { parseCustomRange } from "./time-range.ts";
 import type { CollectProgress } from "./data";
 import type { BaseStats, ProviderStats, TabName, TotalStats, UsageData } from "./data";
 import {
@@ -276,10 +277,12 @@ const TAB_LABELS: Record<TabName, string> = {
 	thisMonth: "This Month",
 	last30Days: "Last 30 Days",
 	allTime: "All Time",
+	custom: "Custom",
 };
 
 class UsageComponent {
 	private activeTab: TabName = "allTime";
+	private tabs: TabName[];
 	private viewMode: ViewMode = "graph";
 	private data: UsageData;
 	private selectedIndex = 0;
@@ -305,6 +308,8 @@ class UsageComponent {
 		this.requestRender = requestRender;
 		this.done = done;
 		this.data = data;
+		this.tabs = data.bounds.customRange ? [...TAB_ORDER, "custom"] : TAB_ORDER;
+		if (data.bounds.customRange) this.activeTab = "custom";
 		this.updateProviderOrder();
 	}
 
@@ -425,14 +430,14 @@ class UsageComponent {
 		}
 
 		if (matchesKey(data, "tab") || matchesKey(data, "right")) {
-			const idx = TAB_ORDER.indexOf(this.activeTab);
-			this.activeTab = TAB_ORDER[(idx + 1) % TAB_ORDER.length]!;
+			const idx = this.tabs.indexOf(this.activeTab);
+			this.activeTab = this.tabs[(idx + 1) % this.tabs.length]!;
 			this.updateProviderOrder();
 			this.exportNote = null;
 			this.requestRender();
 		} else if (matchesKey(data, "shift+tab") || matchesKey(data, "left")) {
-			const idx = TAB_ORDER.indexOf(this.activeTab);
-			this.activeTab = TAB_ORDER[(idx - 1 + TAB_ORDER.length) % TAB_ORDER.length]!;
+			const idx = this.tabs.indexOf(this.activeTab);
+			this.activeTab = this.tabs[(idx - 1 + this.tabs.length) % this.tabs.length]!;
 			this.updateProviderOrder();
 			this.exportNote = null;
 			this.requestRender();
@@ -519,17 +524,18 @@ class UsageComponent {
 		let name: string;
 		let content: string;
 		const stats = this.data[this.activeTab];
+		const period = this.activeTab === "custom" ? `custom-${this.data.bounds.customRange!.key}` : this.activeTab;
 		if (this.viewMode === "graph") {
 			const slice = `${this.graphCumulative ? "cumulative" : "per-bucket"}-${this.graphMetric}-by-${this.graphGroupBy}`;
-			name = exportFileName("graph", this.activeTab, slice, "csv", now);
+			name = exportFileName("graph", period, slice, "csv", now);
 			content = buildGraphCsv(this.buildGraphModelForView());
 		} else if (this.viewMode === "insights") {
-			name = exportFileName("insights", this.activeTab, null, "json", now);
-			content = buildInsightsJson(this.activeTab, stats.totals, stats.insights.insights);
+			name = exportFileName("insights", period, null, "json", now);
+			content = buildInsightsJson(this.activeTab === "custom" ? this.data.bounds.customRange!.label : period, stats.totals, stats.insights.insights);
 		} else {
 			const visible = this.visibleTable();
 			const sliced = this.tableFilter.trim() !== "" || this.tableHidden.size > 0;
-			name = exportFileName("table", this.activeTab, sliced ? "filtered" : null, "csv", now);
+			name = exportFileName("table", period, sliced ? "filtered" : null, "csv", now);
 			content = buildTableCsv(visible.providers, visible.totals);
 		}
 		try {
@@ -552,7 +558,7 @@ class UsageComponent {
 	}
 
 	private buildGraphModelForView(): GraphModel {
-		return buildGraphModel(this.data.hourly, {
+		return buildGraphModel(this.activeTab === "custom" ? this.data.customHourly : this.data.hourly, {
 			period: this.activeTab,
 			metric: this.graphMetric,
 			groupBy: this.graphGroupBy,
@@ -754,12 +760,13 @@ class UsageComponent {
 
 	private renderTabs(width: number, layout: TableLayout): string[] {
 		const th = this.theme;
-		const fullTabs = TAB_ORDER.map((tab) => {
-			const label = TAB_LABELS[tab];
+		const fullTabs = this.tabs.map((tab) => {
+			const label = tab === "custom" ? this.data.bounds.customRange!.label : TAB_LABELS[tab];
 			return tab === this.activeTab ? th.fg("accent", `[${label}]`) : th.fg("dim", ` ${label} `);
 		}).join("  ");
 
-		const activeTabOnly = th.fg("accent", `[${TAB_LABELS[this.activeTab]}]`);
+		const activeLabel = this.activeTab === "custom" ? this.data.bounds.customRange!.label : TAB_LABELS[this.activeTab];
+		const activeTabOnly = th.fg("accent", `[${activeLabel}]`);
 		const tabLine = pickFittingText(width, [
 			fullTabs,
 			`${activeTabOnly}  ${th.fg("dim", "[Tab/←→]")}`,
@@ -931,9 +938,16 @@ class UsageComponent {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("usage", {
-		description: "Show usage statistics dashboard",
-		handler: async (_args: string, ctx: ExtensionCommandContext) => {
+		description: "用量统计交互面板（支持自定义时间范围）",
+		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			if (!ctx.hasUI) {
+				return;
+			}
+			let customRange;
+			try {
+				customRange = parseCustomRange(args);
+			} catch (error) {
+				ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
 				return;
 			}
 
@@ -967,7 +981,7 @@ export default function (pi: ExtensionAPI) {
 					}
 				};
 
-				collectUsageData({ signal: loader.signal, onProgress })
+				collectUsageData({ signal: loader.signal, onProgress, customRange })
 					.then(finish)
 					.catch(() => finish(null));
 

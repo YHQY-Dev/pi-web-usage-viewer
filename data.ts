@@ -11,6 +11,8 @@
  *   re-parses files that changed since the last run.
  */
 
+import { isInCustomRange } from "./time-range.ts";
+import type { CustomRange } from "./time-range.ts";
 import { readFileSync } from "node:fs";
 import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -147,6 +149,7 @@ export function splitHourlyKey(key: HourlyKey): { provider: string; model: strin
 }
 
 export interface PeriodBounds {
+	customRange?: CustomRange;
 	todayMs: number;
 	weekStartMs: number;
 	lastWeekStartMs: number;
@@ -156,6 +159,8 @@ export interface PeriodBounds {
 }
 
 export interface UsageData {
+	custom: TimeFilteredStats;
+	customHourly: Map<number, Map<HourlyKey, HourlyCell>>;
 	today: TimeFilteredStats;
 	thisWeek: TimeFilteredStats;
 	lastWeek: TimeFilteredStats;
@@ -167,7 +172,7 @@ export interface UsageData {
 	bounds: PeriodBounds;
 }
 
-export type TabName = "today" | "thisWeek" | "lastWeek" | "thisMonth" | "last30Days" | "allTime";
+export type TabName = "today" | "thisWeek" | "lastWeek" | "thisMonth" | "last30Days" | "allTime" | "custom";
 
 export const TAB_ORDER: TabName[] = ["today", "thisWeek", "lastWeek", "thisMonth", "last30Days", "allTime"];
 
@@ -1090,6 +1095,8 @@ export function projectLabelFromCwd(cwd: string): string {
 
 function emptyUsageData(bounds: PeriodBounds): UsageData {
 	return {
+		custom: emptyTimeFilteredStats(),
+		customHourly: new Map(),
 		today: emptyTimeFilteredStats(),
 		thisWeek: emptyTimeFilteredStats(),
 		lastWeek: emptyTimeFilteredStats(),
@@ -1179,7 +1186,7 @@ function addMessagesToUsageData(
 	rawByPeriod: Record<TabName, PeriodRawData>,
 	costByDayIdx: Map<number, number>
 ): void {
-	const sessionContributed = { today: false, thisWeek: false, lastWeek: false, thisMonth: false, last30Days: false, allTime: false };
+	const sessionContributed = { today: false, thisWeek: false, lastWeek: false, thisMonth: false, last30Days: false, allTime: false, custom: false };
 
 	for (let mi = 0; mi < messages.length; mi++) {
 		const msg = messages[mi]!;
@@ -1204,6 +1211,10 @@ function addMessagesToUsageData(
 			thisMonthStartMs,
 			last30DaysStartMs
 		);
+		if (data.bounds.customRange && isInCustomRange(msg.timestamp, data.bounds.customRange)) {
+			periods.push("custom");
+			addToHourlyBuckets(data.customHourly, msg);
+		}
 		const tokens = {
 			// Count fresh tokens processed this turn.
 			// Include cacheWrite because those prompt tokens were newly written and billed.
@@ -1285,6 +1296,7 @@ function addMessagesToUsageData(
 	if (sessionContributed.thisMonth) data.thisMonth.totals.sessions++;
 	if (sessionContributed.last30Days) data.last30Days.totals.sessions++;
 	if (sessionContributed.allTime) data.allTime.totals.sessions++;
+	if (sessionContributed.custom) data.custom.totals.sessions++;
 }
 
 // =============================================================================
@@ -1414,6 +1426,7 @@ export interface CollectUsageOptions {
 	/** Reference time for period bucketing. Defaults to `new Date()`. */
 	now?: Date;
 	parseConcurrency?: number;
+	customRange?: CustomRange;
 }
 
 export async function collectUsageData(options: CollectUsageOptions = {}): Promise<UsageData | null> {
@@ -1583,8 +1596,10 @@ export async function collectUsageData(options: CollectUsageOptions = {}): Promi
 		thisMonthStartMs,
 		last30DaysStartMs,
 		nowMs: now.getTime(),
+		customRange: options.customRange,
 	});
 	const rawByPeriod: Record<TabName, PeriodRawData> = {
+		custom: emptyPeriodRawData(),
 		today: emptyPeriodRawData(),
 		thisWeek: emptyPeriodRawData(),
 		lastWeek: emptyPeriodRawData(),
@@ -1671,8 +1686,8 @@ export async function collectUsageData(options: CollectUsageOptions = {}): Promi
 	}
 	const trend: TrendInfo | null = prior28 > 0 ? { last7Cost: last7, priorWeeklyPace: prior28 / 4 } : null;
 
-	for (const period of TAB_ORDER) {
-		data[period].insights = computeInsights(rawByPeriod[period], trend);
+	for (const period of [...TAB_ORDER, "custom"] as TabName[]) {
+		data[period].insights = computeInsights(rawByPeriod[period], period === "custom" ? null : trend);
 	}
 
 	return data;

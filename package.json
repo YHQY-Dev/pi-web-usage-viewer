@@ -1,6 +1,11 @@
 {
   "name": "@tmustier/pi-usage-extension",
   "version": "0.10.2",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "check": "tsc --noEmit --module preserve --moduleResolution bundler --target es2022 --allowImportingTsExtensions --skipLibCheck --strict index.ts data.ts graph.ts export.ts time-range.ts test/time-range.test.ts"
+  },
   "description": "Usage statistics dashboard for Pi sessions.",
   "license": "MIT",
   "author": "Thomas Mustier",
@@ -27,6 +32,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.87.0",
-    "@earendil-works/pi-tui": "0.87.0"
+    "@earendil-works/pi-tui": "0.87.0",
+    "typescript": "^7.0.2"
   }
 }
