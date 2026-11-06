@@ -7,11 +7,11 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-c
 import { collectUsageData } from "../data.ts";
 import type { TimeFilteredStats, UsageData } from "../data.ts";
 import { parseCustomRange } from "../time-range.ts";
-import { buildTrend, buildUsageReport, modelRows, renderModelsSvg, escapeXml } from "../svg-report.ts";
+import { buildTrend, buildUsageReport, modelRows, renderTrendSvg, escapeXml } from "../svg-report.ts";
 import { parseReportArgs, showUsageReport } from "../report-command.ts";
 
 function emptyStats(): TimeFilteredStats {
-	return { dailyCosts: new Map(), providers: new Map(), totals: {
+	return { dailyCosts: new Map(), dailyModelCosts: new Map(), providers: new Map(), totals: {
 		cost: 0, messages: 0, sessions: 0, tokens: { total: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	}, insights: { insights: [] } };
 }
@@ -50,7 +50,14 @@ test("long ranges aggregate calendar months into bounded SVG size without losing
 	for (const [date, cost] of [[new Date(2000, 0, 2), 1], [new Date(2050, 4, 1), 2], [new Date(2099, 11, 31), 3]] as const) {
 		data.custom.dailyCosts.set(date.getTime(), cost);
 	}
+	data.custom.providers.set("p", { ...data.custom.totals, sessions: new Set(), models: new Map([
+		["m", { ...data.custom.totals, cost: 6, sessions: new Set() }],
+	]) });
+	data.custom.totals.cost = 6;
+	data.custom.dailyModelCosts.set(JSON.stringify(["p", "m"]), new Map(data.custom.dailyCosts));
 	const trend = buildTrend(data, "custom");
+	assert.deepEqual(trend.series[1]!.points, trend.points);
+	assert.equal(trend.series[1]!.total, 6);
 	assert.ok(trend.points.length <= 94);
 	assert.match(trend.unit, /个月/);
 	assert.equal(trend.points.reduce((s, p) => s + p.cost, 0), 6);
@@ -79,8 +86,18 @@ test("real collector daily buckets match post-dedupe totals across local midnigh
 			assert.equal(buildTrend(data, "custom").points.reduce((s, p) => s + p.cost, 0), 10.5);
 			assert.equal(modelRows(data.custom).reduce((s, r) => s + r.cost, 0), 10.5);
 			const report = buildUsageReport(data, "custom");
-			assert.equal((report.match(/```svg\n/g) ?? []).length, 2);
-			assert.equal((report.match(/\n```/g) ?? []).length, 4);
+			assert.equal((report.match(/```svg\n/g) ?? []).length, 1);
+			assert.equal((report.match(/\n```/g) ?? []).length, 2);
+			const trend = buildTrend(data, "custom");
+			assert.deepEqual(trend.series[1]!.points.map((p) => p.cost), [3, 7]);
+			assert.deepEqual(trend.series[2]!.points.map((p) => p.cost), [0.5, 0]);
+			assert.deepEqual(trend.series.map((s) => s.total), [10.5, 10, 0.5]);
+			for (let i = 0; i < trend.points.length; i++) {
+				assert.equal(trend.series.slice(1).reduce((sum, s) => sum + s.points[i]!.cost, 0), trend.points[i]!.cost);
+			}
+			assert.match(report, /总额（\$10\.5000）/);
+			assert.match(report, /Tools \/ summaries（\$0\.5000）/);
+			assert.doesNotMatch(report, /后端本地时区|各模型费用排行|Token 总量 =|费用来自本地会话|不支持悬停/);
 			assert.match(report, /\$10\.5000/);
 			assert.match(report, /p&lt;&amp;\|/);
 			assert.doesNotMatch(report, /<script>/);
@@ -90,17 +107,45 @@ test("real collector daily buckets match post-dedupe totals across local midnigh
 	} finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("empty report is explicit; zero-cost model charts remain finite; excess rows are grouped", () => {
+test("empty report is explicit; zero-cost model lines stay finite and all legends are retained", () => {
 	const data = fixture();
 	assert.match(buildUsageReport(data, "custom"), /没有用量记录/);
 	const stats = emptyStats();
 	stats.providers.set("openai", { ...stats.totals, sessions: new Set(), models: new Map(
 		Array.from({ length: 15 }, (_, i) => [`model-${i}`, { ...stats.totals, sessions: new Set() }]),
 	) });
-	const svg = renderModelsSvg(modelRows(stats));
-	assert.match(svg, /其他 3 个模型/);
+	data.custom = stats;
+	const svg = renderTrendSvg(buildTrend(data, "custom"), "每日费用趋势", "test");
+	assert.equal((svg.match(/<polyline /g) ?? []).length, 16);
+	for (let i = 0; i < 15; i++) assert.ok(svg.includes(`openai / model-${i}（$0.0000）`));
 	assert.doesNotMatch(svg, /NaN|Infinity/);
 	assert.equal(escapeXml('<script a="&">'), "&lt;script a=&quot;&amp;&quot;&gt;");
+});
+
+test("report headings show actual dates and compact timezone, with only range help at the end", () => {
+	const data = fixture();
+	data.bounds = {
+		...data.bounds, todayMs: new Date(2026, 10, 6).getTime(),
+		weekStartMs: new Date(2026, 10, 2).getTime(), lastWeekStartMs: new Date(2026, 9, 26).getTime(),
+		thisMonthStartMs: new Date(2026, 10, 1).getTime(), last30DaysStartMs: new Date(2026, 9, 8).getTime(),
+		nowMs: new Date(2026, 10, 6, 16, 50).getTime(),
+	};
+	for (const [period, title] of [
+		["today", "今天（2026-11-06 至 2026-11-06）"],
+		["thisWeek", "本周（2026-11-02 至 2026-11-06）"],
+		["lastWeek", "上周（2026-10-26 至 2026-11-01）"],
+		["thisMonth", "本月（2026-11-01 至 2026-11-06）"],
+		["last30Days", "最近 30 天（2026-10-08 至 2026-11-06）"],
+		["custom", "自定义范围（2026-11-01 至 2026-11-03）"],
+	] as const) {
+		const report = buildUsageReport(data, period);
+		assert.ok(report.startsWith(`## 用量统计 · ${title}\n\n时区：`));
+		assert.ok(report.endsWith("或 `/usage 2026-11-01 2026-11-06`。"));
+	}
+	data.allTime.dailyCosts.set(new Date(2026, 9, 12).getTime(), 1);
+	assert.ok(buildUsageReport(data, "allTime").startsWith("## 用量统计 · 全部历史（2026-10-12 至 2026-11-06）"));
+	data.bounds.customRange = parseCustomRange("2026-11-01T08:30 2026-11-01T09:15")!;
+	assert.ok(buildUsageReport(data, "custom").includes("2026-11-01 08:30 至 2026-11-01 09:15（结束时刻不含）"));
 });
 
 function mocks(selection?: string, inputs: (string | undefined)[] = []) {

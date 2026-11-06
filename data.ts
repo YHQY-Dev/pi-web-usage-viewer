@@ -117,6 +117,8 @@ export interface TrendInfo {
 export interface TimeFilteredStats {
 	/** Exact post-dedupe cost per backend-local calendar day; excludes unknown timestamps. */
 	dailyCosts: Map<number, number>;
+	/** JSON [provider, model] → exact daily costs, with the same dedupe and range filtering. */
+	dailyModelCosts: Map<string, Map<number, number>>;
 	providers: Map<string, ProviderStats>;
 	totals: TotalStats;
 	insights: PeriodInsights;
@@ -1035,6 +1037,7 @@ function emptyProviderStats(): ProviderStats {
 function emptyTimeFilteredStats(): TimeFilteredStats {
 	return {
 		dailyCosts: new Map(),
+		dailyModelCosts: new Map(),
 		providers: new Map(),
 		totals: { sessions: 0, messages: 0, cost: 0, tokens: emptyTokens() },
 		insights: { insights: [] },
@@ -1236,6 +1239,13 @@ function addMessagesToUsageData(
 				day.setHours(0, 0, 0, 0);
 				const key = day.getTime();
 				stats.dailyCosts.set(key, (stats.dailyCosts.get(key) ?? 0) + msg.cost);
+				const modelKey = JSON.stringify([msg.provider, msg.model]);
+				let modelDays = stats.dailyModelCosts.get(modelKey);
+				if (!modelDays) {
+					modelDays = new Map();
+					stats.dailyModelCosts.set(modelKey, modelDays);
+				}
+				modelDays.set(key, (modelDays.get(key) ?? 0) + msg.cost);
 			}
 
 			let providerStats = stats.providers.get(msg.provider);
