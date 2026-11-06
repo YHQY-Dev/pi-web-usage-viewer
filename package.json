@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.ts",
-    "check": "tsc --noEmit --module preserve --moduleResolution bundler --target es2022 --allowImportingTsExtensions --skipLibCheck --strict index.ts data.ts graph.ts export.ts time-range.ts test/time-range.test.ts"
+    "check": "tsc --noEmit --module preserve --moduleResolution bundler --target es2022 --allowImportingTsExtensions --skipLibCheck --strict index.ts data.ts graph.ts export.ts time-range.ts chart-probe.ts test/time-range.test.ts test/chart-probe.test.ts"
   },
   "description": "Usage statistics dashboard for Pi sessions.",
   "license": "MIT",
